@@ -1,0 +1,25 @@
+# Core Streamlit and Web Framework
+streamlit>=1.28.0
+requests>=2.31.0
+
+# Data Processing and Analysis
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Machine Learning and AI
+scikit-learn>=1.3.0
+scipy>=1.11.0
+
+# Visualization Libraries
+matplotlib>=3.7.0
+plotly>=5.15.0
+
+# Geographic and Location Services
+geopy>=2.3.0
+
+# Additional Utilities
+json5>=0.9.14
+datetime
+
+# Optional: Enhanced Performance
+numba>=0.57.0
