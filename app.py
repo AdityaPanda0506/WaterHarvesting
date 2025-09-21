@@ -1,1054 +1,1108 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from data_fetcher import (DataFetcher, calculate_harvesting_potential, calculate_runoff_volume,
+                         calculate_recharge_structure_size, calculate_cost_benefit, 
+                         calculate_feasibility_score, calculate_detailed_cost_breakdown,
+                         calculate_payback_analysis)
 import numpy as np
-from datetime import datetime
-import warnings
-warnings.filterwarnings('ignore')
 
-# Import functions from the enhanced system
-from rainwater_utils import (
-    get_location, get_soil_type, fetch_historical_rainfall_data, 
-    fetch_weather_forecast_data, fetch_imd_monsoon_forecast,
-    calculate_water_metrics, assess_feasibility, 
-    calculate_recharge_structures_enhanced, create_comprehensive_charts,
-    generate_comprehensive_report, analyze_rainwater_harvesting,
-    create_comprehensive_financial_chart, INDIAN_WATER_COSTS
-)
-
-# --------------------------
-# Page Configuration
-# --------------------------
+# Set page configuration
 st.set_page_config(
-    page_title="💧 Rainwater Harvesting Pro - India Edition", 
-    page_icon="💧", 
-    layout="wide"
+    page_title="Rainwater Harvesting Feasibility Analysis - Enhanced",
+    page_icon="💧",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-# Custom CSS for Indian theme
+# Initialize data fetcher
+data_fetcher = DataFetcher()
+
+# Custom CSS
 st.markdown("""
 <style>
-    .metric-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1rem;
-        border-radius: 10px;
-        margin: 0.5rem 0;
+    .main-header {
+        font-size: 3rem;
+        color: #1E88E5;
+        text-align: center;
+        margin-bottom: 2rem;
     }
-    .success-card {
-        background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-        padding: 1rem;
-        border-radius: 10px;
-        color: white;
+    .feasibility-high {
+        color: #4CAF50;
+        font-weight: bold;
+        font-size: 1.2rem;
     }
-    .warning-card {
-        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-        padding: 1rem;
+    .feasibility-medium {
+        color: #FF9800;
+        font-weight: bold;
+        font-size: 1.2rem;
+    }
+    .feasibility-low {
+        color: #F44336;
+        font-weight: bold;
+        font-size: 1.2rem;
+    }
+    .card {
+        padding: 20px;
         border-radius: 10px;
-        color: white;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        margin-bottom: 20px;
+        background: white;
+    }
+    .scheme-card {
+        border: 2px solid #4CAF50;
+        border-radius: 10px;
+        padding: 15px;
+        margin: 10px 0;
+        background: #f8fff8;
+    }
+    .cost-item {
+        display: flex;
+        justify-content: space-between;
+        padding: 5px 0;
+        border-bottom: 1px solid #eee;
+    }
+    .savings-highlight {
+        background: #e8f5e8;
+        padding: 15px;
+        border-radius: 8px;
+        border-left: 4px solid #4CAF50;
+    }
+    .data-source {
+        background: #e3f2fd;
+        padding: 10px;
+        border-radius: 5px;
+        border-left: 3px solid #2196F3;
+        margin: 10px 0;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# --------------------------
-# Title and Header
-# --------------------------
-st.title("💧 Professional Rainwater Harvesting Feasibility Assessment - India Edition")
-st.markdown("**Comprehensive analysis with future predictions, cost-benefit evaluation in ₹, and authentic Indian data**")
+# Sidebar for user input
+with st.sidebar:
+    st.title("🏠 Rainwater Harvesting Input")
+    
+    # Location Details
+    st.subheader("📍 Location Details")
+    address = st.text_input("Enter your address in India:", "Chennai, Tamil Nadu")
+    state_name = st.selectbox("Select State:", [
+        "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh",
+        "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka",
+        "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram",
+        "Nagaland", "Odisha", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu",
+        "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal",
+        "Delhi", "Jammu and Kashmir", "Ladakh"
+    ], index=22)  # Default to Tamil Nadu
+    
+    # System Configuration
+    st.subheader("🏗️ System Configuration")
+    roof_area = st.number_input("Roof Area (square meters):", min_value=10, max_value=1000, value=100)
+    roof_type = st.selectbox("Roof Type:", ["Concrete", "Metal", "Tiled", "Thatched", "Asbestos", "Slate"])
+    
+    # Advanced Options
+    with st.expander("⚙️ Advanced Options"):
+        water_rate = st.slider("Water Cost (₹ per liter):", 0.01, 0.20, 0.05, 0.01)
+        maintenance_rate = st.slider("Annual Maintenance (% of cost):", 1, 5, 2, 1) / 100
+        system_efficiency = st.slider("System Efficiency (%):", 70, 95, 85, 5) / 100
+    
+    if st.button("🔍 Analyze Feasibility", type="primary"):
+        with st.spinner("🔍 Fetching authentic data from government APIs..."):
+            # Get latitude and longitude from address
+            lat, lon = data_fetcher.get_lat_lon_from_address(address)
+            
+            if lat is None or lon is None:
+                st.error("❌ Could not find the location. Please enter a valid Indian address.")
+            else:
+                # Fetch data from enhanced APIs
+                rainfall_data = data_fetcher.get_rainfall_data(lat, lon, state_name)
+                soil_data = data_fetcher.get_soil_type(lat, lon, state_name)
+                groundwater_data = data_fetcher.get_groundwater_data(lat, lon)
+                
+                # Calculate runoff coefficient
+                runoff_coeff = data_fetcher.calculate_runoff_coefficient(roof_type, soil_data["type"])
+                
+                # Get government schemes
+                gov_schemes = data_fetcher.get_government_schemes(state_name)
+                
+                # Store data in session state
+                st.session_state.update({
+                    'lat': lat, 'lon': lon, 'rainfall_data': rainfall_data,
+                    'soil_data': soil_data, 'groundwater_data': groundwater_data,
+                    'roof_area': roof_area, 'roof_type': roof_type, 'runoff_coeff': runoff_coeff,
+                    'water_rate': water_rate, 'maintenance_rate': maintenance_rate,
+                    'system_efficiency': system_efficiency, 'state_name': state_name,
+                    'gov_schemes': gov_schemes, 'address': address
+                })
+                
+                st.success(f"✅ Data fetched successfully!")
 
-# Add Indian flag and regional focus
-col1, col2, col3 = st.columns([1, 2, 1])
-with col2:
-    st.markdown("🇮🇳 **Designed for Indian Climate & Conditions** 🇮🇳")
+# Main content
+st.markdown('<h1 class="main-header">🌧️ Rainwater Harvesting Feasibility Analysis</h1>', unsafe_allow_html=True)
 
-# --------------------------
-# Address Input Section
-# --------------------------
-st.header("📍 Location & Property Details")
-
-col1, col2 = st.columns([3, 1])
-
-with col1:
-    address = st.text_input(
-        "📍 Enter your address in India (e.g., 'Mumbai, Maharashtra' or 'Bengaluru, Karnataka')", 
-        placeholder="Enter city, state, India"
-    )
-
-with col2:
-    water_source = st.selectbox(
-        "💧 Primary Water Source",
-        options=list(INDIAN_WATER_COSTS.keys()),
-        index=0,
-        format_func=lambda x: {
-            "municipal": "Municipal Supply (₹15/m³)",
-            "tanker": "Water Tanker (₹45/m³)", 
-            "borewell": "Borewell (₹8/m³)"
-        }[x],
-        help="Select your current water source for cost comparison"
-    )
-
-if not address:
-    st.info("👆 Please enter your address in India to begin the comprehensive analysis.")
+# Check if data is available
+if 'rainfall_data' not in st.session_state:
+    st.info("Please enter your address and roof details in the sidebar to get started.")
+    
+    # Display welcome information
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("""
+        ### 🎯 Enhanced Features:
+        - **Authentic Government Data**: Real rainfall and soil data
+        - **Detailed Cost Analysis**: Complete breakdown with subsidies
+        - **Government Schemes**: Automatic eligibility checking
+        """)
+    
+    with col2:
+        st.markdown("""
+        ### 📊 What You Get:
+        - Live API integration with IMD and Soil Health data
+        - 20-year financial projections
+        - Government subsidy calculations
+        """)
+    
+    with col3:
+        st.markdown("""
+        ### 🏆 Potential Benefits:
+        - Save up to ₹50,000/year on water costs
+        - Get up to 90% government subsidy
+        - Contribute to groundwater conservation
+        """)
+    
     st.stop()
 
-# --------------------------
-# Location Processing
-# --------------------------
-with st.spinner("📍 Locating address in India..."):
-    location = get_location(address)
+# Create enhanced tabs
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    "🌧️ Rainfall Data", 
+    "🏔️ Soil & Aquifer", 
+    "💰 Cost Analysis", 
+    "📈 Financial Projections",
+    "🏛️ Government Schemes", 
+    "📋 Complete Report"
+])
 
-if not location:
-    st.error("❌ Could not find this address. Please check and try again.")
-    st.stop()
-
-lat, lon = location.latitude, location.longitude
-
-# Verify location is in India
-if not (6 <= lat <= 37 and 68 <= lon <= 97):
-    st.warning("⚠️ This address appears to be outside India. This system is optimized for Indian conditions.")
-
-st.success(f"✅ Located: {location.address}")
-st.info(f"**Coordinates**: {lat:.4f}°N, {lon:.4f}°E")
-
-# --------------------------
-# Property Details Input
-# --------------------------
-st.subheader("🏠 Property & Household Information")
-
-col1, col2, col3, col4 = st.columns(4)
-
-with col1:
-    roof_area = st.number_input(
-        "🏠 Roof Area (m²)",
-        min_value=10.0,
-        value=150.0,
-        step=5.0,
-        help="Total roof area available for rainwater collection"
-    )
-
-with col2:
-    household_size = st.number_input(
-        "👥 Household Size",
-        min_value=1,
-        value=4,
-        step=1,
-        help="Number of people in the household"
-    )
-
-with col3:
-    garden_area = st.number_input(
-        "🌱 Garden/Terrace Area (m²)",
-        min_value=0.0,
-        value=50.0,
-        step=5.0,
-        help="Area requiring irrigation (gardens, terrace farming)"
-    )
-
-with col4:
-    analysis_type = st.selectbox(
-        "📊 Analysis Type",
-        ["Quick Analysis", "Comprehensive Analysis"],
-        help="Quick: Basic calculations, Comprehensive: Full report with predictions"
-    )
-
-# --------------------------
-# Soil Analysis Section
-# --------------------------
-st.subheader("🌍 Automated Soil Analysis")
-
-with st.spinner("🌱 Detecting soil type from coordinates..."):
-    soil_data = get_soil_type(lat, lon)
-
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    st.metric("🌱 Detected Soil Type", soil_data['type'])
-with col2:
-    st.metric("📡 Data Source", soil_data['source'])
-with col3:
-    confidence_colors = {"High": "🟢", "Medium": "🟡", "Low": "🟠", "Very Low": "🔴"}
-    st.metric("🎯 Confidence Level", f"{confidence_colors.get(soil_data['confidence'], '⚪')} {soil_data['confidence']}")
-with col4:
-    if 'raw_classification' in soil_data:
-        st.metric("📋 Classification", soil_data['raw_classification'][:20] + "...")
-
-# Manual override option
-with st.expander("🔧 Manual Soil Type Override (Optional)"):
-    manual_override = st.checkbox("Override automatic detection")
-    if manual_override:
-        soil_type = st.selectbox(
-            "Select Soil Type",
-            options=["Sandy", "Sandy Loam", "Loam", "Clay Loam", "Clay", "Silt"],
-            help="Choose based on local soil testing or knowledge"
-        )
-        st.info("💡 Consider getting professional soil testing for accurate results")
-    else:
-        soil_type = soil_data['type']
-
-# --------------------------
-# Data Fetching and Analysis
-# --------------------------
-st.header("📊 Analysis Results")
-
-# Progress tracking
-progress_bar = st.progress(0)
-status_text = st.empty()
-
-try:
-    # Step 1: Historical rainfall data
-    status_text.text("🌧️ Fetching historical rainfall data (2019-2023)...")
-    progress_bar.progress(20)
-    
-    historical_df, yearly_data = fetch_historical_rainfall_data(lat, lon)
-    if historical_df is None:
-        st.error("❌ Could not fetch rainfall data. Please try again later.")
-        st.stop()
-    
-    # Step 2: Future predictions (only for comprehensive analysis)
-    forecast_df = None
-    monsoon_forecast = None
-    
-    if analysis_type == "Comprehensive Analysis":
-        status_text.text("🔮 Generating weather forecasts and predictions...")
-        progress_bar.progress(40)
-        
-        forecast_df = fetch_weather_forecast_data(lat, lon)
-        monsoon_forecast = fetch_imd_monsoon_forecast(lat, lon)
-    
-    # Step 3: Calculate water metrics
-    status_text.text("💧 Calculating water metrics and financial analysis...")
-    progress_bar.progress(60)
-    
-    results = calculate_water_metrics(
-        historical_df, forecast_df, roof_area, household_size, garden_area, water_source
-    )
-    
-    # Step 4: Enhanced recharge structures
-    status_text.text("🏗️ Designing groundwater recharge structures...")
-    progress_bar.progress(80)
-    
-    recharge_data = calculate_recharge_structures_enhanced(
-        results['annual_harvest_historical'], soil_type
-    )
-    
-    # Step 5: Create visualizations
-    if analysis_type == "Comprehensive Analysis":
-        status_text.text("📈 Creating comprehensive visualizations...")
-        progress_bar.progress(90)
-        
-        comprehensive_chart = create_comprehensive_charts(historical_df, forecast_df, results)
-    
-    progress_bar.progress(100)
-    status_text.text("✅ Analysis completed successfully!")
-    
-except Exception as e:
-    st.error(f"❌ Analysis failed: {str(e)}")
-    st.stop()
-
-# --------------------------
-# Executive Dashboard
-# --------------------------
-st.subheader("📊 Executive Dashboard")
-
-# Key Performance Indicators
-col1, col2, col3, col4, col5 = st.columns(5)
-
-with col1:
-    st.metric(
-        "🌧️ Annual Rainfall", 
-        f"{results['annual_rainfall_historical']:.0f} mm",
-        delta=f"+{results.get('annual_rainfall_future', 0) - results['annual_rainfall_historical']:.0f} mm (predicted)" if forecast_df is not None else None
-    )
-
-with col2:
-    st.metric(
-        "💧 Water Harvest", 
-        f"{results['annual_harvest_historical']:.1f} m³/year",
-        delta=f"+{results.get('annual_harvest_future', 0) - results['annual_harvest_historical']:.1f} m³" if forecast_df is not None else None
-    )
-
-with col3:
-    coverage = results['historical_coverage']
-    st.metric("📈 Demand Coverage", f"{coverage:.1f}%")
-    if coverage >= 50:
-        st.success("✅ High coverage")
-    elif coverage >= 25:
-        st.info("ℹ️ Moderate coverage") 
-    else:
-        st.warning("⚠️ Limited coverage")
-
-with col4:
-    total_investment = results['cost_data']['total_initial']
-    st.metric("💰 Total Investment", f"₹{total_investment:,.0f}")
-    
-    # Investment per m³ of harvest
-    cost_per_m3 = total_investment / results['annual_harvest_historical'] if results['annual_harvest_historical'] > 0 else 0
-    st.caption(f"₹{cost_per_m3:,.0f} per m³/year")
-
-with col5:
-    annual_savings = results['annual_savings_future'] if forecast_df is not None and not forecast_df.empty else results['annual_savings_historical']
-    st.metric("💵 Annual Savings", f"₹{annual_savings:,.0f}")
-    
-    payback = results['financial_metrics']['payback_period']
-    if payback:
-        st.caption(f"Payback: {payback:.1f} years")
-    else:
-        st.caption("No payback period")
-
-# Overall Feasibility Assessment
-feasibility_score = assess_feasibility(results)
-st.subheader(f"🎯 Overall Feasibility Score: {feasibility_score:.0f}/100")
-
-# Custom progress bar with color coding
-if feasibility_score >= 80:
-    progress_color = "#28a745"  # Green
-    recommendation = "🎉 **HIGHLY RECOMMENDED** - Excellent investment opportunity!"
-    st.success(recommendation)
-elif feasibility_score >= 60:
-    progress_color = "#17a2b8"  # Blue  
-    recommendation = "💧 **RECOMMENDED** - Good potential for rainwater harvesting"
-    st.success(recommendation)
-elif feasibility_score >= 40:
-    progress_color = "#ffc107"  # Yellow
-    recommendation = "🤔 **MODERATE** - Consider with careful evaluation"
-    st.warning(recommendation)
-else:
-    progress_color = "#dc3545"  # Red
-    recommendation = "⚠️ **LIMITED BENEFIT** - May not be cost-effective"
-    st.error(recommendation)
-
-# Custom progress bar
-st.markdown(f"""
-<div style="background-color: #f0f0f0; border-radius: 10px; padding: 3px;">
-    <div style="background-color: {progress_color}; width: {feasibility_score}%; height: 20px; border-radius: 8px; text-align: center; color: white; font-weight: bold;">
-        {feasibility_score:.0f}%
-    </div>
-</div>
-""", unsafe_allow_html=True)
-
-# --------------------------
-# Detailed Analysis Tabs
-# --------------------------
-st.header("📈 Detailed Analysis")
-
-if analysis_type == "Comprehensive Analysis":
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "🌧️ Rainfall Analysis", "💰 Financial Analysis", "🌊 Recharge Structures", 
-        "🌍 Environmental Impact", "📋 Implementation Plan", "📊 Comprehensive Report"
-    ])
-else:
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "🌧️ Rainfall Analysis", "💰 Financial Analysis", 
-        "🌊 Recharge Structures", "🌍 Environmental Impact"
-    ])
-
-# Tab 1: Rainfall Analysis
+# Tab 1: Enhanced Rainfall Analysis
 with tab1:
-    if analysis_type == "Comprehensive Analysis" and forecast_df is not None:
-        st.pyplot(comprehensive_chart, use_container_width=True)
+    st.header("🌧️ Rainfall Analysis & Water Potential")
+    
+    # Data source information
+    st.markdown(f'<div class="data-source">📡 <strong>Data Source:</strong> {st.session_state.rainfall_data["source"]}</div>', 
+                unsafe_allow_html=True)
+    
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        st.subheader("📊 Monthly Rainfall Pattern")
+        rainfall_df = pd.DataFrame.from_dict(
+            st.session_state.rainfall_data["monthly"], 
+            orient="index", 
+            columns=["Rainfall (mm)"]
+        )
+        rainfall_df['Month'] = rainfall_df.index
         
-        # Monsoon forecast details
-        if monsoon_forecast:
-            st.subheader("🌦️ Monsoon Forecast (IMD Style)")
-            col1, col2, col3 = st.columns(3)
+        fig = px.bar(
+            rainfall_df, 
+            x='Month', 
+            y="Rainfall (mm)",
+            title="Monthly Rainfall Distribution",
+            color="Rainfall (mm)",
+            color_continuous_scale="Blues"
+        )
+        fig.update_layout(xaxis_tickangle=-45)
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Key rainfall metrics
+        st.subheader("🌦️ Rainfall Characteristics")
+        col_m1, col_m2 = st.columns(2)
+        with col_m1:
+            st.metric("Annual Rainfall", f"{st.session_state.rainfall_data['annual']:,} mm")
+            st.metric("Wettest Month", f"{max(st.session_state.rainfall_data['monthly'], key=st.session_state.rainfall_data['monthly'].get)}")
+        with col_m2:
+            st.metric("Rainy Days/Year", f"{st.session_state.rainfall_data['rainy_days']} days")
+            st.metric("Average Daily Rain", f"{st.session_state.rainfall_data['annual']/st.session_state.rainfall_data['rainy_days']:.1f} mm")
+    
+    with col2:
+        st.subheader("💧 Water Harvesting Potential")
+        
+        # Calculate monthly harvesting potential
+        monthly_potential = {}
+        for month, rainfall in st.session_state.rainfall_data["monthly"].items():
+            monthly_potential[month] = calculate_harvesting_potential(
+                st.session_state.roof_area, 
+                rainfall, 
+                st.session_state.runoff_coeff,
+                st.session_state.system_efficiency
+            )
+        
+        annual_potential = sum(monthly_potential.values())
+        
+        # Key harvest metrics
+        col_h1, col_h2 = st.columns(2)
+        with col_h1:
+            st.metric("Annual Harvest", f"{annual_potential:,.0f} L")
+            st.metric("Peak Month Harvest", f"{max(monthly_potential.values()):,.0f} L")
+        with col_h2:
+            st.metric("Daily Average", f"{annual_potential/365:.0f} L")
+            st.metric("Per sq.m Harvest", f"{annual_potential/st.session_state.roof_area:.0f} L/m²")
+        
+        # Monthly harvest chart
+        potential_df = pd.DataFrame.from_dict(
+            monthly_potential, 
+            orient="index", 
+            columns=["Water (liters)"]
+        )
+        potential_df['Month'] = potential_df.index
+        
+        fig_line = px.line(
+            potential_df, 
+            x='Month', 
+            y="Water (liters)",
+            title="Monthly Water Harvest Potential",
+            markers=True,
+            line_shape="spline"
+        )
+        fig_line.update_layout(xaxis_tickangle=-45)
+        st.plotly_chart(fig_line, use_container_width=True)
+        
+        # System efficiency display
+        st.info(f"🔧 Runoff Coefficient: {st.session_state.runoff_coeff:.3f}")
+        st.info(f"⚙️ System Efficiency: {st.session_state.system_efficiency*100:.0f}%")
+
+# Tab 2: Enhanced Soil & Aquifer Analysis
+with tab2:
+    st.header("🏔️ Soil & Hydrogeological Analysis")
+    
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        st.subheader("🌱 Soil Analysis")
+        st.markdown(f'<div class="data-source">📡 <strong>Data Source:</strong> {st.session_state.soil_data["source"]}</div>', 
+                    unsafe_allow_html=True)
+        
+        # Enhanced soil metrics
+        soil_metrics_data = {
+            'Property': ['Soil Type', 'Infiltration Rate', 'Suitability Score', 'pH Level', 'Organic Carbon'],
+            'Value': [
+                st.session_state.soil_data["type"],
+                f"{st.session_state.soil_data['infiltration_rate']} mm/hr",
+                f"{st.session_state.soil_data['suitability']}/10",
+                f"{st.session_state.soil_data.get('ph', 'N/A')}",
+                f"{st.session_state.soil_data.get('organic_carbon', 'N/A')}%"
+            ]
+        }
+        
+        soil_df = pd.DataFrame(soil_metrics_data)
+        st.dataframe(soil_df, use_container_width=True, hide_index=True)
+        
+        # Soil suitability gauge
+        suitability_score = st.session_state.soil_data['suitability']
+        
+        fig_gauge = go.Figure(go.Indicator(
+            mode = "gauge+number",
+            value = suitability_score,
+            domain = {'x': [0, 1], 'y': [0, 1]},
+            title = {'text': "Soil Suitability Score"},
+            gauge = {
+                'axis': {'range': [None, 10]},
+                'bar': {'color': "darkgreen" if suitability_score >= 7 else "orange" if suitability_score >= 4 else "red"},
+                'steps': [
+                    {'range': [0, 4], 'color': "lightgray"},
+                    {'range': [4, 7], 'color': "lightyellow"},
+                    {'range': [7, 10], 'color': "lightgreen"}
+                ],
+                'threshold': {
+                    'line': {'color': "red", 'width': 4},
+                    'thickness': 0.75,
+                    'value': 8
+                }
+            }
+        ))
+        fig_gauge.update_layout(height=300)
+        st.plotly_chart(fig_gauge, use_container_width=True)
+        
+    with col2:
+        st.subheader("💧 Groundwater Analysis")
+        st.markdown(f'<div class="data-source">📡 <strong>Data Source:</strong> {st.session_state.groundwater_data["source"]}</div>', 
+                    unsafe_allow_html=True)
+        
+        # Enhanced groundwater metrics
+        gw_metrics_data = {
+            'Property': ['Water Table Depth', 'Water Quality', 'Natural Recharge Rate', 'Aquifer Type'],
+            'Value': [
+                f"{st.session_state.groundwater_data['depth']:.1f} meters",
+                st.session_state.groundwater_data['quality'],
+                f"{st.session_state.groundwater_data['recharge_rate']:.2f} mm/day",
+                st.session_state.groundwater_data['aquifer_type']
+            ]
+        }
+        
+        gw_df = pd.DataFrame(gw_metrics_data)
+        st.dataframe(gw_df, use_container_width=True, hide_index=True)
+        
+        # Water table depth assessment
+        depth = st.session_state.groundwater_data['depth']
+        if depth < 8:
+            st.success("✅ Shallow water table - Excellent for recharge")
+        elif depth < 20:
+            st.warning("⚠️ Moderate depth - Good for recharge")
+        else:
+            st.error("❌ Deep water table - Requires careful design")
+    
+    # Infiltration Analysis
+    st.subheader("📊 Infiltration vs Rainfall Analysis")
+    
+    avg_monthly_rainfall = st.session_state.rainfall_data["annual"] / 12
+    soil_infiltration_monthly = st.session_state.soil_data["infiltration_rate"] * 24 * 30
+    peak_rainfall = max(st.session_state.rainfall_data["monthly"].values())
+    
+    comparison_data = pd.DataFrame({
+        'Parameter': ['Average Monthly Rainfall', 'Peak Monthly Rainfall', 'Soil Infiltration Capacity'],
+        'Value (mm)': [avg_monthly_rainfall, peak_rainfall, soil_infiltration_monthly]
+    })
+    
+    fig_comparison = px.bar(
+        comparison_data, 
+        x='Parameter', 
+        y='Value (mm)',
+        title="Rainfall vs Soil Infiltration Analysis",
+        color='Value (mm)',
+        color_continuous_scale='RdYlBu_r'
+    )
+    st.plotly_chart(fig_comparison, use_container_width=True)
+    
+    if soil_infiltration_monthly > peak_rainfall:
+        st.success("✅ Soil can handle peak rainfall - Excellent infiltration capacity")
+    elif soil_infiltration_monthly > avg_monthly_rainfall:
+        st.warning("⚠️ Soil adequate for average rainfall - May need overflow management")
+    else:
+        st.error("❌ Limited soil infiltration - Surface storage strongly recommended")
+
+# Tab 3: Detailed Cost Analysis
+with tab3:
+    st.header("💰 Detailed Cost Breakdown")
+    
+    # Calculate detailed costs
+    cost_breakdown = calculate_detailed_cost_breakdown(
+        st.session_state.roof_area, 
+        st.session_state.soil_data["type"]
+    )
+    
+    col1, col2 = st.columns([3, 2])
+    
+    with col1:
+        st.subheader("🧾 Itemized Costs")
+        
+        # Create detailed cost table
+        cost_items = []
+        cost_categories = {
+            "Collection System": ["gutters_downpipes", "first_flush_diverter", "leaf_screen", "collection_tank"],
+            "Treatment System": ["sand_filter", "activated_carbon_filter", "uv_sterilizer"],
+            "Recharge System": ["excavation", "gravel_sand", "pvc_pipes", "recharge_structure"],
+            "Installation": ["labor", "electrical_work", "testing_commissioning", "permit_fees"]
+        }
+        
+        item_names = {
+            "gutters_downpipes": "Gutters & Downpipes",
+            "first_flush_diverter": "First Flush Diverter",
+            "leaf_screen": "Leaf Screens",
+            "collection_tank": "Storage Tank",
+            "sand_filter": "Sand Filter",
+            "activated_carbon_filter": "Carbon Filter",
+            "uv_sterilizer": "UV Sterilizer",
+            "excavation": "Excavation Work",
+            "gravel_sand": "Filter Media",
+            "pvc_pipes": "Piping System",
+            "recharge_structure": "Recharge Structure",
+            "labor": "Labor Charges",
+            "electrical_work": "Electrical Work",
+            "testing_commissioning": "Testing & Setup",
+            "permit_fees": "Permits & Approvals"
+        }
+        
+        for category, items in cost_categories.items():
+            category_total = 0
+            for item in items:
+                if item in cost_breakdown["itemwise_costs"]:
+                    cost = cost_breakdown["itemwise_costs"][item]
+                    cost_items.append({
+                        'Category': category,
+                        'Item': item_names.get(item, item.replace('_', ' ').title()),
+                        'Cost (₹)': f"{cost:,.0f}"
+                    })
+                    category_total += cost
+        
+        # Add totals
+        cost_items.append({'Category': 'SUBTOTAL', 'Item': '', 'Cost (₹)': f"{cost_breakdown['subtotal']:,.0f}"})
+        cost_items.append({'Category': 'CONTINGENCY', 'Item': '10%', 'Cost (₹)': f"{cost_breakdown['contingency']:,.0f}"})
+        cost_items.append({'Category': 'TOTAL', 'Item': '', 'Cost (₹)': f"{cost_breakdown['total_cost']:,.0f}"})
+        
+        cost_df = pd.DataFrame(cost_items)
+        st.dataframe(cost_df, use_container_width=True, hide_index=True)
+        
+        # Key cost metrics
+        st.subheader("💡 Cost Analysis")
+        col_c1, col_c2, col_c3 = st.columns(3)
+        with col_c1:
+            st.metric("Total Project Cost", f"₹{cost_breakdown['total_cost']:,.0f}")
+        with col_c2:
+            st.metric("Cost per sq.m", f"₹{cost_breakdown['cost_per_sqm']:,.0f}")
+        with col_c3:
+            st.metric("Cost per Liter Capacity", f"₹{cost_breakdown['total_cost']/(st.session_state.roof_area*50):.1f}")
+    
+    with col2:
+        st.subheader("📊 Cost Distribution")
+        
+        # Calculate category totals for pie chart
+        category_totals = {}
+        for category, items in cost_categories.items():
+            total = sum(cost_breakdown["itemwise_costs"].get(item, 0) for item in items)
+            category_totals[category] = total
+        
+        fig_pie = px.pie(
+            values=list(category_totals.values()), 
+            names=list(category_totals.keys()),
+            title="Cost Distribution by System"
+        )
+        st.plotly_chart(fig_pie, use_container_width=True)
+        
+        # Cost vs Area Analysis
+        st.subheader("📈 Economies of Scale")
+        
+        areas = [50, 100, 150, 200, 300, 500]
+        costs = []
+        cost_per_sqm = []
+        
+        for area in areas:
+            temp_breakdown = calculate_detailed_cost_breakdown(area, st.session_state.soil_data["type"])
+            costs.append(temp_breakdown["total_cost"])
+            cost_per_sqm.append(temp_breakdown["cost_per_sqm"])
+        
+        scale_df = pd.DataFrame({
+            'Roof Area (sq.m)': areas,
+            'Total Cost (₹)': costs,
+            'Cost per sq.m (₹)': cost_per_sqm
+        })
+        
+        fig_scale = px.line(
+            scale_df, 
+            x='Roof Area (sq.m)', 
+            y='Cost per sq.m (₹)',
+            title="Cost Efficiency vs System Size",
+            markers=True
+        )
+        st.plotly_chart(fig_scale, use_container_width=True)
+
+# Tab 4: Enhanced Financial Projections
+with tab4:
+    st.header("📈 Comprehensive Financial Analysis")
+    
+    # Calculate financial metrics
+    annual_harvest = calculate_harvesting_potential(
+        st.session_state.roof_area, 
+        st.session_state.rainfall_data["annual"], 
+        st.session_state.runoff_coeff,
+        st.session_state.system_efficiency
+    )
+    
+    cost_breakdown = calculate_detailed_cost_breakdown(
+        st.session_state.roof_area, 
+        st.session_state.soil_data["type"]
+    )
+    
+    payback_analysis = calculate_payback_analysis(
+        cost_breakdown["total_cost"], 
+        annual_harvest, 
+        st.session_state.water_rate,
+        st.session_state.maintenance_rate
+    )
+    
+    # Key Financial Metrics
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Investment", f"₹{cost_breakdown['total_cost']:,.0f}")
+        st.metric("Annual Harvest", f"{annual_harvest:,.0f} L")
+    
+    with col2:
+        st.metric("Annual Savings", f"₹{payback_analysis['annual_water_savings']:,.0f}")
+        st.metric("Annual Maintenance", f"₹{payback_analysis['annual_maintenance']:,.0f}")
+    
+    with col3:
+        st.metric("Net Annual Benefit", f"₹{payback_analysis['net_annual_benefit']:,.0f}")
+        roi = (payback_analysis['net_annual_benefit'] / cost_breakdown['total_cost']) * 100
+        st.metric("Annual ROI", f"{roi:.1f}%")
+    
+    with col4:
+        if payback_analysis['payback_period']:
+            st.metric("Payback Period", f"{payback_analysis['payback_period']:.1f} years")
+        else:
+            st.metric("Payback Period", "N/A")
+        st.metric("20-Year NPV", f"₹{payback_analysis['npv']:,.0f}")
+    
+    # 20-Year Financial Projection Chart
+    st.subheader("📊 20-Year Financial Projection")
+    
+    fig = make_subplots(
+        rows=2, cols=1,
+        subplot_titles=('Cumulative Cash Flow Analysis', 'Annual Cash Flow'),
+        vertical_spacing=0.1
+    )
+    
+    years = payback_analysis['years']
+    cumulative_benefits = payback_analysis['cumulative_benefits']
+    initial_investment = [cost_breakdown['total_cost']] * len(years)
+    
+    # Cumulative analysis
+    fig.add_trace(
+        go.Scatter(x=years, y=cumulative_benefits, name='Cumulative Benefits', 
+                  line=dict(color='green', width=3)),
+        row=1, col=1
+    )
+    
+    fig.add_trace(
+        go.Scatter(x=years, y=initial_investment, name='Break-even Line', 
+                  line=dict(color='red', dash='dash', width=2)),
+        row=1, col=1
+    )
+    
+    # Annual cash flow
+    annual_net_benefits = [payback_analysis['net_annual_benefit']] * len(years)
+    fig.add_trace(
+        go.Bar(x=years, y=annual_net_benefits, name='Annual Net Benefit', 
+               marker_color='lightblue', opacity=0.7),
+        row=2, col=1
+    )
+    
+    # Mark payback period
+    if payback_analysis['payback_period'] and payback_analysis['payback_period'] <= 20:
+        fig.add_vline(
+            x=payback_analysis['payback_period'], 
+            line_dash="dot", 
+            line_color="orange",
+            annotation_text=f"Payback: {payback_analysis['payback_period']:.1f} years",
+            annotation_position="top"
+        )
+    
+    fig.update_layout(height=600, showlegend=True)
+    fig.update_xaxes(title_text="Years", row=2, col=1)
+    fig.update_yaxes(title_text="Amount (₹)", row=1, col=1)
+    fig.update_yaxes(title_text="Amount (₹)", row=2, col=1)
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Financial Assessment
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("💰 Investment Quality")
+        
+        if roi > 15:
+            st.success(f"🌟 Excellent Investment: {roi:.1f}% annual return")
+        elif roi > 8:
+            st.warning(f"⚡ Good Investment: {roi:.1f}% annual return")
+        else:
+            st.info(f"💡 Moderate Investment: {roi:.1f}% annual return")
+        
+        # Investment comparison
+        investment_comparison = pd.DataFrame({
+            'Investment Type': ['Rainwater Harvesting', 'Fixed Deposit', 'Savings Account'],
+            'Annual Return (%)': [roi, 6.5, 3.5],
+            'Risk Level': ['Low', 'Very Low', 'Very Low']
+        })
+        
+        st.dataframe(investment_comparison, use_container_width=True, hide_index=True)
+    
+    with col2:
+        st.subheader("🔍 Sensitivity Analysis")
+        
+        # Water rate sensitivity
+        water_rates = np.linspace(0.02, 0.10, 5)
+        payback_periods = []
+        
+        for rate in water_rates:
+            temp_analysis = calculate_payback_analysis(
+                cost_breakdown["total_cost"], 
+                annual_harvest, 
+                rate,
+                st.session_state.maintenance_rate
+            )
+            payback_periods.append(temp_analysis['payback_period'] if temp_analysis['payback_period'] else 25)
+        
+        sensitivity_df = pd.DataFrame({
+            'Water Rate (₹/L)': water_rates,
+            'Payback Period (years)': payback_periods
+        })
+        
+        fig_sensitivity = px.line(
+            sensitivity_df,
+            x='Water Rate (₹/L)',
+            y='Payback Period (years)',
+            title='Payback Sensitivity to Water Rates',
+            markers=True
+        )
+        st.plotly_chart(fig_sensitivity, use_container_width=True)
+
+# Tab 5: Government Schemes
+with tab5:
+    st.header("🏛️ Government Subsidies & Schemes")
+    
+    st.markdown(f"**Available schemes for {st.session_state.state_name}:**")
+    
+    # Calculate best available subsidy
+    best_subsidy = 0
+    best_scheme = None
+    
+    for scheme in st.session_state.gov_schemes:
+        project_cost = cost_breakdown['total_cost']
+        actual_subsidy = min(
+            project_cost * (scheme['subsidy_percentage'] / 100),
+            scheme['max_amount']
+        )
+        
+        if actual_subsidy > best_subsidy:
+            best_subsidy = actual_subsidy
+            best_scheme = scheme
+    
+    # Display schemes
+    for i, scheme in enumerate(st.session_state.gov_schemes):
+        with st.container():
+            st.markdown(f'<div class="scheme-card">', unsafe_allow_html=True)
+            
+            col1, col2, col3 = st.columns([3, 1, 1])
             
             with col1:
-                st.metric("Seasonal Rainfall", f"{monsoon_forecast['seasonal_rainfall_percent']:.0f}% of normal")
-                st.metric("Monsoon Onset", monsoon_forecast['monsoon_onset_date'])
-                
+                st.markdown(f"### {scheme['name']}")
+                st.write(scheme['description'])
+            
             with col2:
-                st.metric("Heavy Rainfall Days", f"{monsoon_forecast['heavy_rainfall_days']} days")
-                st.metric("Monsoon Withdrawal", monsoon_forecast['monsoon_withdrawal_date'])
-                
+                st.metric("Subsidy Rate", f"{scheme['subsidy_percentage']}%")
+                st.metric("Max Amount", f"₹{scheme['max_amount']:,}")
+            
             with col3:
-                drought_risk = monsoon_forecast['drought_risk']
-                flood_risk = monsoon_forecast['flood_risk']
+                # Calculate actual subsidy for this project
+                project_cost = cost_breakdown['total_cost']
+                actual_subsidy = min(
+                    project_cost * (scheme['subsidy_percentage'] / 100),
+                    scheme['max_amount']
+                )
                 
-                if drought_risk == 'Low':
-                    st.success(f"🌵 Drought Risk: {drought_risk}")
-                else:
-                    st.warning(f"🌵 Drought Risk: {drought_risk}")
-                    
-                if flood_risk == 'Low':
-                    st.success(f"🌊 Flood Risk: {flood_risk}")
-                else:
-                    st.warning(f"🌊 Flood Risk: {flood_risk}")
-    
-    else:
-        # Basic rainfall chart for quick analysis
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
-        
-        # Monthly rainfall
-        ax1.bar(historical_df["Month"], historical_df["Historical_Rainfall_mm"], 
-                color="skyblue", edgecolor="navy", alpha=0.7)
-        ax1.axhline(y=30, color="red", linestyle="--", label="Dry Threshold (30mm)")
-        ax1.set_title("Monthly Rainfall Distribution")
-        ax1.set_ylabel("Rainfall (mm)")
-        ax1.tick_params(axis='x', rotation=45)
-        ax1.legend()
-        ax1.grid(axis="y", alpha=0.3)
-        
-        # Water balance
-        monthly_demand = results['total_demand'] / 12
-        ax2.bar(range(len(historical_df)), historical_df["Harvested_m3"], 
-                label='Harvested Supply', color='lightblue')
-        ax2.axhline(y=monthly_demand, color="red", linestyle="-", 
-                    label=f"Monthly Demand ({monthly_demand:.1f} m³)")
-        ax2.set_title("Monthly Water Supply vs Demand")
-        ax2.set_ylabel("Water (m³)")
-        ax2.set_xticks(range(len(historical_df)))
-        ax2.set_xticklabels([m[:3] for m in historical_df["Month"]], rotation=45)
-        ax2.legend()
-        ax2.grid(axis="y", alpha=0.3)
-        
-        plt.tight_layout()
-        st.pyplot(fig, use_container_width=True)
-    
-    # Water demand breakdown
-    st.subheader("💧 Water Demand Analysis")
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("🚰 Drinking Water", f"{results['drinking_demand']:.1f} m³/year")
-    with col2:
-        st.metric("🏠 Domestic Use", f"{results['domestic_demand']:.1f} m³/year")
-    with col3:
-        st.metric("🌱 Garden Irrigation", f"{results['garden_demand']:.1f} m³/year")
-    with col4:
-        st.metric("📊 Total Demand", f"{results['total_demand']:.1f} m³/year")
-
-# Tab 2: Financial Analysis
-with tab2:
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("💰 Investment Breakdown")
-        
-        # System recommendation
-        st.info(f"**Recommended System**: {results['system_type'].title()}")
-        st.info(f"**Storage Capacity**: {results['recommended_storage']:.1f} m³")
-        
-        # Cost breakdown
-        st.write("**Initial Costs:**")
-        costs = results['cost_data']['initial_costs']
-        for component, cost in costs.items():
-            if cost > 0:
-                st.write(f"• {component.replace('_', ' ').title()}: ₹{cost:,.0f}")
-        
-        st.markdown(f"**Total Initial Investment: ₹{results['cost_data']['total_initial']:,.0f}**")
-        
-        st.write("**Annual Operating Costs:**")
-        annual_costs = results['cost_data']['annual_costs']
-        for component, cost in annual_costs.items():
-            if cost > 0:
-                st.write(f"• {component.replace('_', ' ').title()}: ₹{cost:,.0f}")
-        
-        st.markdown(f"**Total Annual Cost: ₹{results['cost_data']['total_annual']:,.0f}**")
-    
-    with col2:
-        st.subheader("📈 Financial Returns")
-        
-        # Key financial metrics
-        fm = results['financial_metrics']
-        
-        col2_1, col2_2 = st.columns(2)
-        with col2_1:
-            st.metric("NPV (20 years)", f"₹{fm['npv']:,.0f}")
-            st.metric("IRR", f"{fm['irr']*100:.1f}% p.a.")
+                st.metric("Your Subsidy", f"₹{actual_subsidy:,.0f}")
+                final_cost = project_cost - actual_subsidy
+                st.metric("Net Cost", f"₹{final_cost:,.0f}")
             
-        with col2_2:
-            if fm['payback_period']:
-                st.metric("Payback Period", f"{fm['payback_period']:.1f} years")
-            else:
-                st.metric("Payback Period", "No payback")
-                
-            st.metric("Benefit-Cost Ratio", f"{fm['benefit_cost_ratio']:.2f}")
+            st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown("---")
+    
+    # Best scheme recommendation
+    if best_scheme:
+        st.markdown('<div class="savings-highlight">', unsafe_allow_html=True)
+        st.markdown(f"### 🎯 **Best Option: {best_scheme['name']}**")
         
-        # Financial viability assessment
-        if fm['npv'] > 0 and fm['benefit_cost_ratio'] > 1.0:
-            st.success("✅ **Financially Viable**: Positive returns expected")
-        elif fm['benefit_cost_ratio'] > 0.8:
-            st.warning("⚠️ **Marginal Viability**: Consider optimizations")
-        else:
-            st.error("❌ **Not Financially Viable**: Returns below investment")
-    
-    # 20-year projection with enhanced visualization
-    st.subheader("📊 Enhanced 20-Year Financial Analysis")
-    
-    # Create enhanced financial chart
-    enhanced_financial_chart = create_comprehensive_financial_chart(results['financial_metrics'], results)
-    st.pyplot(enhanced_financial_chart, use_container_width=True)
-    
-    # Additional financial insights
-    st.subheader("💡 Financial Insights")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        total_benefits = results['financial_metrics']['total_benefits_pv']
-        total_costs = results['financial_metrics']['total_costs_pv']
-        st.metric("Total Benefits (PV)", f"₹{total_benefits:,.0f}")
-        st.metric("Total Costs (PV)", f"₹{total_costs:,.0f}")
+        col1, col2, col3, col4 = st.columns(4)
         
-    with col2:
-        roi_percentage = ((total_benefits - total_costs) / total_costs) * 100 if total_costs > 0 else 0
-        st.metric("Return on Investment", f"{roi_percentage:.1f}%")
+        with col1:
+            st.metric("Original Cost", f"₹{cost_breakdown['total_cost']:,.0f}")
         
-        break_even_year = results['financial_metrics']['payback_period']
-        if break_even_year:
-            st.metric("Break-even Point", f"Year {break_even_year}")
-        else:
-            st.metric("Break-even Point", "Not achieved")
-            
-    with col3:
-        # Calculate monthly cash flow in final year
-        if results['financial_metrics']['yearly_analysis']:
-            final_year_net = results['financial_metrics']['yearly_analysis'][-1]['net_annual']
-            monthly_cash_flow = final_year_net / 12
-            st.metric("Final Year Monthly Cash Flow", f"₹{monthly_cash_flow:,.0f}")
+        with col2:
+            st.metric("Subsidy", f"₹{best_subsidy:,.0f}")
         
-        # Risk assessment
-        if results['financial_metrics']['benefit_cost_ratio'] > 1.3:
-            st.success("Low Risk Investment")
-        elif results['financial_metrics']['benefit_cost_ratio'] > 1.0:
-            st.info("Moderate Risk Investment")
-        else:
-            st.warning("High Risk Investment")
-    
-    # Detailed benefit breakdown table
-    st.subheader("🎯 Detailed Annual Benefits Breakdown")
-    
-    from rainwater_utils import (
-        calculate_avoided_tanker_costs, calculate_gardening_benefits,
-        calculate_property_value_benefit, calculate_infrastructure_savings
-    )
-    
-    annual_water_savings = results.get('annual_savings_future', results.get('annual_savings_historical', 0))
-    
-    benefits_data = {
-        'Benefit Category': [
-            'Direct Water Bill Savings',
-            'Sewage/Drainage Charge Savings', 
-            'Avoided Water Tanker Costs',
-            'Home Gardening Benefits',
-            'Property Value Appreciation',
-            'Community Infrastructure Savings'
-        ],
-        'Annual Amount (₹)': [
-            annual_water_savings,
-            annual_water_savings * 0.7,
-            calculate_avoided_tanker_costs(annual_water_savings, 'medium'),
-            calculate_gardening_benefits(annual_water_savings, household_size),
-            calculate_property_value_benefit(roof_area, 'medium'),
-            calculate_infrastructure_savings('urban', roof_area)
-        ],
-        'Description': [
-            'Direct reduction in municipal water bills',
-            'Reduced sewage charges due to lower consumption',
-            'Avoided emergency tanker purchases during shortages',
-            'Value of homegrown vegetables and herbs',
-            'Annual benefit from increased property value',
-            'Community savings from reduced stormwater load'
-        ]
-    }
-    
-    benefits_df = pd.DataFrame(benefits_data)
-    benefits_df['20-Year Total (₹)'] = benefits_df['Annual Amount (₹)'] * 20
-    
-    st.dataframe(
-        benefits_df.style.format({
-            'Annual Amount (₹)': '₹{:,.0f}',
-            '20-Year Total (₹)': '₹{:,.0f}'
-        }).background_gradient(subset=['Annual Amount (₹)'], cmap='Greens'),
-        use_container_width=True
-    )
-    
-    total_annual_benefits = benefits_df['Annual Amount (₹)'].sum()
-    st.success(f"💰 **Total Annual Benefits**: ₹{total_annual_benefits:,.0f}")
-    st.info(f"📈 **20-Year Benefit Total**: ₹{total_annual_benefits * 20:,.0f}")
-    
-    # Sensitivity analysis
-    st.subheader("📊 Sensitivity Analysis")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.write("**Impact of Water Cost Changes**")
-        water_cost_scenarios = {
-            'Conservative (+5%/year)': 0.05,
-            'Expected (+8%/year)': 0.08,
-            'High inflation (+12%/year)': 0.12
-        }
+        with col3:
+            st.metric("Your Investment", f"₹{cost_breakdown['total_cost'] - best_subsidy:,.0f}")
         
-        for scenario, rate in water_cost_scenarios.items():
-            # Recalculate NPV for different scenarios
-            future_value = annual_water_savings * (1 + rate) ** 10  # 10-year projection
-            st.write(f"• {scenario}: ₹{future_value:,.0f} (Year 10)")
-            
-    with col2:
-        st.write("**Risk Factors**")
-        risk_factors = [
-            f"Rainfall variation: ±{results['dry_months_historical']/12*100:.0f}%",
-            f"System maintenance: ₹{results['cost_data']['total_annual']:,.0f}/year",
-            "Technology obsolescence: Low risk",
-            "Regulatory changes: Medium risk"
-        ]
+        with col4:
+            savings_percent = (best_subsidy / cost_breakdown['total_cost']) * 100
+            st.metric("Savings", f"{savings_percent:.1f}%")
         
-        for risk in risk_factors:
-            st.write(f"• {risk}")
-
-# Tab 3: Recharge Structures
-with tab3:
-    st.subheader("🌊 Groundwater Recharge Analysis")
-    
-    # Soil suitability overview
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("🌱 Soil Type", soil_type)
-    with col2:
-        st.metric("💧 Infiltration Rate", f"{recharge_data['soil_infiltration_rate']} mm/hr")
-    with col3:
-        suitability = recharge_data['soil_suitability']
-        if suitability == "High":
-            st.success(f"✅ {suitability} Suitability")
-        elif suitability == "Medium":
-            st.info(f"ℹ️ {suitability} Suitability")
-        else:
-            st.warning(f"⚠️ {suitability} Suitability")
-    with col4:
-        st.metric("🔄 Annual Recharge", f"{recharge_data['annual_recharge_potential']:.1f} m³")
-    
-    st.info(f"**💡 Recommended Structure**: {recharge_data['recommended_structure'].replace('_', ' ').title()}")
-    st.caption(f"**Reason**: {recharge_data['recommendation_reason']}")
-    
-    # Structure comparison
-    st.subheader("🏗️ Recharge Structure Options")
-    
-    structures_display = {
-        "recharge_pit": "🕳️ Recharge Pit",
-        "recharge_trench": "🚧 Recharge Trench", 
-        "percolation_tank": "🏊 Percolation Tank",
-        "injection_well": "🕳️ Injection Well"
-    }
-    
-    cols = st.columns(len(recharge_data['structures']))
-    
-    for i, (struct_key, struct_data) in enumerate(recharge_data['structures'].items()):
-        with cols[i]:
-            st.markdown(f"**{structures_display[struct_key]}**")
-            st.metric("Volume", f"{struct_data['volume']:.1f} m³")
-            st.metric("Cost", f"₹{struct_data['cost']:,.0f}")
-            st.metric("Annual Maintenance", f"₹{struct_data['maintenance_annual']:,.0f}")
-            
-            # Structure-specific dimensions
-            if 'diameter' in struct_data and 'depth' in struct_data:
-                st.write(f"📐 Ø{struct_data['diameter']:.1f}m × {struct_data['depth']:.1f}m deep")
-            elif 'length' in struct_data:
-                st.write(f"📐 {struct_data['length']:.1f}m × {struct_data['width']:.1f}m × {struct_data['depth']:.1f}m")
-            elif 'area' in struct_data:
-                st.write(f"📐 {struct_data['area']:.1f} m² area")
-    
-    # Cost summary for recommended structure
-    recommended_cost = recharge_data['total_estimated_cost']
-    recommended_maintenance = recharge_data['annual_maintenance_cost']
-    
-    st.success(f"💰 **Recommended Investment**: ₹{recommended_cost:,.0f} initial + ₹{recommended_maintenance:,.0f}/year maintenance")
-    
-    # Groundwater benefits
-    st.subheader("🌍 Groundwater Benefits")
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.metric("💧 Groundwater Recharge", f"{recharge_data['groundwater_recharge_benefit']:.1f} m³/year")
-    with col2:
-        # Calculate approximate groundwater value
-        groundwater_value = recharge_data['groundwater_recharge_benefit'] * INDIAN_WATER_COSTS['borewell']
-        st.metric("🏦 Groundwater Value", f"₹{groundwater_value:,.0f}/year")
-    with col3:
-        # Environmental benefit
-        st.metric("🌱 Environmental Score", "High" if recharge_data['groundwater_recharge_benefit'] > 10 else "Medium")
-    
-    st.warning("⚠️ **Important**: Consult with hydrogeologist and check local regulations before implementing recharge structures")
-
-# Tab 4: Environmental Impact
-with tab4:
-    st.subheader("🌍 Environmental Impact Assessment")
-    
-    env_impact = results['environmental_impact']
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("💧 Water Conservation", f"{env_impact['water_saved_liters']:,.0f} L/year")
-        st.caption("Fresh water saved annually")
+        st.markdown('</div>', unsafe_allow_html=True)
         
-    with col2:
-        st.metric("⚡ Energy Savings", f"{env_impact['energy_saved_kwh']:.0f} kWh/year")
-        st.caption("Energy for water treatment/pumping")
+        # Impact of subsidy on financial returns
+        subsidized_cost = cost_breakdown['total_cost'] - best_subsidy
+        subsidized_payback = calculate_payback_analysis(
+            subsidized_cost, 
+            annual_harvest, 
+            st.session_state.water_rate,
+            st.session_state.maintenance_rate
+        )
         
-    with col3:
-        st.metric("🌿 CO₂ Reduction", f"{env_impact['co2_reduction_kg']:.0f} kg/year")
-        st.caption("Carbon footprint reduction")
+        st.subheader("📊 Financial Impact of Subsidies")
         
-    with col4:
-        st.metric("🌳 Tree Equivalent", f"{env_impact['equivalent_trees']:.1f} trees")
-        st.caption("Environmental impact equivalence")
-    
-    # Additional environmental metrics
-    st.subheader("🌱 Extended Environmental Benefits")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.info(f"🚗 **Transportation Impact**: Equivalent to {env_impact['equivalent_car_km']:,.0f} km less car travel per year")
-        st.info(f"🌊 **Stormwater Management**: {env_impact['runoff_reduced_m3']:.1f} m³ reduced runoff")
-        
-    with col2:
-        # Calculate additional benefits
-        plastic_bottles_saved = env_impact['water_saved_liters'] / 1  # 1L bottles
-        st.info(f"🍶 **Plastic Reduction**: ~{plastic_bottles_saved:,.0f} plastic bottles avoided")
-        
-        # Water security benefit
-        security_score = min(100, (results['historical_coverage'] / 50) * 100)
-        st.info(f"🔒 **Water Security Score**: {security_score:.0f}/100")
-
-# Additional tabs for comprehensive analysis
-if analysis_type == "Comprehensive Analysis":
-    # Tab 5: Implementation Plan
-    with tab5:
-        st.subheader("📋 Implementation Roadmap")
-        
-        # Phase-wise implementation
-        phases = [
-            {
-                "phase": "Phase 1: Planning & Permits",
-                "duration": "Months 1-2", 
-                "tasks": [
-                    "Obtain building permits and approvals",
-                    "Get detailed site survey and soil testing",
-                    "Finalize system design and specifications",
-                    "Get quotations from certified installers"
-                ],
-                "cost": "₹15,000 - ₹25,000"
-            },
-            {
-                "phase": "Phase 2: System Installation", 
-                "duration": "Months 2-4",
-                "tasks": [
-                    "Install storage tanks and piping",
-                    "Set up filtration and treatment systems", 
-                    "Install gutters and collection system",
-                    "Commission and test the complete system"
-                ],
-                "cost": f"₹{results['cost_data']['total_initial']:,.0f}"
-            },
-            {
-                "phase": "Phase 3: Recharge Structures",
-                "duration": "Months 4-5", 
-                "tasks": [
-                    "Excavate and construct recharge structures",
-                    "Install filter media and overflow systems",
-                    "Connect overflow from storage to recharge",
-                    "Test recharge efficiency"
-                ],
-                "cost": f"₹{recharge_data['total_estimated_cost']:,.0f}"
-            },
-            {
-                "phase": "Phase 4: Monitoring & Optimization",
-                "duration": "Months 5-6",
-                "tasks": [
-                    "Install monitoring equipment",
-                    "Set up maintenance schedule",
-                    "Train household members",
-                    "Document system performance"
-                ],
-                "cost": "₹10,000 - ₹20,000"
-            }
-        ]
-        
-        for phase in phases:
-            with st.expander(f"📅 {phase['phase']} ({phase['duration']})"):
-                st.write(f"**Estimated Cost**: {phase['cost']}")
-                st.write("**Key Activities**:")
-                for task in phase['tasks']:
-                    st.write(f"• {task}")
-        
-        # Timeline visualization
-        st.subheader("📅 Implementation Timeline")
-        
-        timeline_data = {
-            'Phase': ['Planning', 'Installation', 'Recharge', 'Monitoring'],
-            'Start_Month': [1, 2, 4, 5],
-            'Duration': [2, 2, 1, 1],
-            'Investment': [20000, results['cost_data']['total_initial'], recharge_data['total_estimated_cost'], 15000]
-        }
-        
-        timeline_df = pd.DataFrame(timeline_data)
-        
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
-        
-        # Timeline chart
-        for i, row in timeline_df.iterrows():
-            ax1.barh(i, row['Duration'], left=row['Start_Month'], height=0.5, 
-                    label=row['Phase'], alpha=0.7)
-            ax1.text(row['Start_Month'] + row['Duration']/2, i, row['Phase'], 
-                    ha='center', va='center', fontweight='bold')
-        
-        ax1.set_xlabel('Months')
-        ax1.set_ylabel('Implementation Phases')
-        ax1.set_title('Project Timeline')
-        ax1.set_yticks(range(len(timeline_df)))
-        ax1.set_yticklabels([])
-        ax1.grid(axis='x', alpha=0.3)
-        
-        # Investment flow
-        ax2.bar(timeline_df['Phase'], timeline_df['Investment'], alpha=0.7, color=['blue', 'green', 'orange', 'red'])
-        ax2.set_ylabel('Investment (₹)')
-        ax2.set_title('Phase-wise Investment')
-        ax2.tick_params(axis='x', rotation=45)
-        
-        # Format y-axis
-        ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'₹{x/100000:.1f}L' if x >= 100000 else f'₹{x/1000:.0f}K'))
-        
-        plt.tight_layout()
-        st.pyplot(fig, use_container_width=True)
-        
-        # Government incentives and schemes
-        st.subheader("🏛️ Government Incentives & Schemes")
+        # Before/after comparison
+        comparison_data = pd.DataFrame({
+            'Scenario': ['Without Subsidy', 'With Best Subsidy'],
+            'Investment (₹)': [cost_breakdown['total_cost'], subsidized_cost],
+            'Payback Period (years)': [
+                payback_analysis['payback_period'] if payback_analysis['payback_period'] else 25, 
+                subsidized_payback['payback_period'] if subsidized_payback['payback_period'] else 25
+            ],
+            'NPV 20-year (₹)': [payback_analysis['npv'], subsidized_payback['npv']]
+        })
         
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("**Central Government Schemes:**")
-            st.write("• Jal Shakti Abhiyan - Rainwater harvesting promotion")
-            st.write("• MGNREGA - Funding for community RWH projects")
-            st.write("• Smart Cities Mission - Urban water management")
-            st.write("• Income tax benefits under Section 80C (some states)")
-            
-        with col2:
-            st.markdown("**State-Level Benefits:**")
-            st.write("• Property tax rebates (up to 10% in many cities)")
-            st.write("• Building approval fast-track")
-            st.write("• Subsidies for installation (varies by state)")
-            st.write("• Mandatory RWH in new constructions")
-        
-        st.info("💡 **Tip**: Check with local municipal corporation for specific incentives in your area")
-        
-        # Maintenance schedule
-        st.subheader("🔧 Maintenance Schedule")
-        
-        maintenance_schedule = {
-            'Frequency': ['Monthly', 'Quarterly', 'Half-yearly', 'Annually'],
-            'Tasks': [
-                'Check gutters, clean debris, inspect first-flush diverter',
-                'Clean storage tank, replace/clean filters, check pump',
-                'Professional water quality testing, system inspection',
-                'Deep cleaning, equipment servicing, roof maintenance'
-            ],
-            'Estimated_Cost': ['₹500', '₹2,000', '₹3,500', '₹8,000']
-        }
-        
-        for i, freq in enumerate(maintenance_schedule['Frequency']):
-            with st.expander(f"🔄 {freq} Maintenance"):
-                st.write(f"**Tasks**: {maintenance_schedule['Tasks'][i]}")
-                st.write(f"**Estimated Cost**: {maintenance_schedule['Estimated_Cost'][i]}")
-
-    # Tab 6: Comprehensive Report
-    with tab6:
-        st.subheader("📊 Comprehensive Analysis Report")
-        
-        # Generate full report
-        report = generate_comprehensive_report(
-            location, results, soil_data, monsoon_forecast, recharge_data
-        )
-        
-        # Report download
-        col1, col2 = st.columns([3, 1])
-        
-        with col1:
-            st.info("📄 Complete technical report with all analysis details")
-            
-        with col2:
-            st.download_button(
-                label="📥 Download Report",
-                data=report,
-                file_name=f"rainwater_harvesting_report_{address.replace(' ', '_').replace(',', '')}.txt",
-                mime="text/plain"
+            fig_investment = px.bar(
+                comparison_data, 
+                x='Scenario', 
+                y='Investment (₹)',
+                title='Investment Comparison',
+                color='Investment (₹)',
+                color_continuous_scale='RdYlGn_r'
             )
+            st.plotly_chart(fig_investment, use_container_width=True)
         
-        # Display report in expandable section
-        with st.expander("📖 View Full Report", expanded=False):
-            st.text(report)
-        
-        # Key findings summary
-        st.subheader("🔑 Key Findings & Recommendations")
-        
-        if feasibility_score >= 70:
-            st.success("✅ **STRONG RECOMMENDATION**: Proceed with implementation")
-            recommendations = [
-                "System shows excellent financial viability",
-                "High water harvest potential for your location",
-                "Consider phased implementation starting with basic system",
-                "Include groundwater recharge for maximum benefit"
-            ]
-        elif feasibility_score >= 50:
-            st.info("ℹ️ **MODERATE RECOMMENDATION**: Proceed with optimizations")
-            recommendations = [
-                "System is economically viable with careful planning",
-                "Consider starting with smaller system and expanding",
-                "Focus on non-potable uses initially",
-                "Monitor water costs - viability will improve over time"
-            ]
-        else:
-            st.warning("⚠️ **LIMITED RECOMMENDATION**: Consider alternatives")
-            recommendations = [
-                "Current conditions show limited financial viability",
-                "Consider water conservation measures first",
-                "Monitor for changes in water costs or system costs",
-                "Explore community-scale or shared systems"
-            ]
-        
-        for recommendation in recommendations:
-            st.write(f"• {recommendation}")
-
-# --------------------------
-# Additional Tools and Resources
-# --------------------------
-st.header("🛠️ Additional Tools & Resources")
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    st.subheader("🧮 Quick Calculator")
-    with st.expander("💧 Monthly Savings Calculator"):
-        monthly_consumption = st.number_input("Monthly water consumption (m³)", min_value=5.0, value=15.0)
-        current_rate = INDIAN_WATER_COSTS[water_source]
-        monthly_bill = monthly_consumption * current_rate
-        
-        potential_savings_percent = min(results['historical_coverage'], 80) / 100  # Cap at 80%
-        potential_monthly_savings = monthly_bill * potential_savings_percent
-        
-        st.metric("Current Monthly Bill", f"₹{monthly_bill:,.0f}")
-        st.metric("Potential Monthly Savings", f"₹{potential_monthly_savings:,.0f}")
-        st.metric("Annual Savings", f"₹{potential_monthly_savings * 12:,.0f}")
-
-with col2:
-    st.subheader("📞 Expert Consultation")
-    st.info("**Need Professional Help?**")
-    st.write("• Certified water management engineers")
-    st.write("• Soil testing laboratories")
-    st.write("• RWH system installers")
-    st.write("• Government subsidy consultants")
+        with col2:
+            fig_payback = px.bar(
+                comparison_data, 
+                x='Scenario', 
+                y='Payback Period (years)',
+                title='Payback Period Comparison',
+                color='Payback Period (years)',
+                color_continuous_scale='RdYlGn_r'
+            )
+            st.plotly_chart(fig_payback, use_container_width=True)
     
-    if st.button("🔍 Find Local Experts"):
-        st.info(f"Search for 'rainwater harvesting contractors near {address}'")
-
-with col3:
-    st.subheader("📚 Learning Resources")
-    with st.expander("📖 Useful Links"):
+    # Application process guidance
+    st.subheader("📋 How to Apply")
+    
+    with st.expander("🚀 Complete Application Guide"):
         st.markdown("""
-        **Government Resources:**
-        • [Ministry of Jal Shakti](https://jalshakti.gov.in)
-        • [Central Ground Water Board](https://cgwb.gov.in)
-        • [Jal Shakti Abhiyan Guidelines](https://jalshakti.gov.in/jsa)
+        ### Step 1: Document Preparation
+        - Property documents (sale deed/lease)
+        - Identity proof (Aadhar, PAN)
+        - Address proof
+        - Technical drawings and cost estimates
         
-        **Technical Resources:**
-        • Bureau of Indian Standards (BIS) codes
-        • CPHEEO Manual on Water Supply
-        • Rainwater Harvesting Guidelines
+        ### Step 2: Technical Clearance
+        - Soil percolation test report
+        - Structural stability certificate
+        - Local authority NOC
+        
+        ### Step 3: Online Application
+        - Visit state water department portal
+        - Fill application with required documents
+        - Pay processing fee (₹500-₹2,000)
+        
+        ### Step 4: Site Inspection
+        - Schedule inspection by officials
+        - Ensure compliance with technical norms
+        - Get approval certificate
+        
+        ### Step 5: Implementation
+        - Use empaneled contractors (if mandatory)
+        - Follow approved technical specifications
+        - Maintain quality control
+        
+        ### Step 6: Subsidy Disbursement
+        - Submit completion certificate
+        - Provide bills and invoices
+        - Receive subsidy (30-60 days)
+        
+        ### 📞 Important Contacts
+        - **State Water Department**: Check your state portal
+        - **District Collector**: For MGNREGA schemes  
+        - **Agriculture Department**: For farm systems
         """)
 
-# --------------------------
-# Comparison Tool
-# --------------------------
-st.header("⚖️ Comparison with Alternatives")
+# Tab 6: Complete Report
+with tab6:
+    st.header("📋 Comprehensive Feasibility Report")
+    
+    # Calculate final feasibility score
+    feasibility_score = calculate_feasibility_score(
+        st.session_state.soil_data["suitability"],
+        st.session_state.rainfall_data["annual"],
+        st.session_state.groundwater_data["depth"],
+        st.session_state.roof_area,
+        st.session_state.runoff_coeff
+    )
+    
+    # Executive Summary
+    st.subheader("🎯 Executive Summary")
+    
+    if feasibility_score >= 70:
+        score_class = "feasibility-high"
+        recommendation = "Highly Recommended"
+        status_color = "#4CAF50"
+    elif feasibility_score >= 50:
+        score_class = "feasibility-medium"
+        recommendation = "Recommended"
+        status_color = "#FF9800"
+    else:
+        score_class = "feasibility-low"
+        recommendation = "Requires Evaluation"
+        status_color = "#F44336"
+    
+    # Enhanced feasibility display
+    st.markdown(f'''
+    <div style="background: linear-gradient(135deg, {status_color}22 0%, {status_color}11 100%); 
+                border-left: 5px solid {status_color}; padding: 20px; border-radius: 10px; margin: 20px 0;">
+        <div style="text-align: center;">
+            <h1 style="color: {status_color}; margin: 0;">Feasibility Score: {feasibility_score:.1f}/100</h1>
+            <h2 style="color: {status_color}; margin: 10px 0;">Status: {recommendation}</h2>
+        </div>
+    </div>
+    ''', unsafe_allow_html=True)
+    
+    # Key findings
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("📊 Technical Summary")
+        
+        technical_data = {
+            'Parameter': [
+                'Location',
+                'Annual Rainfall',
+                'Rainy Days',
+                'Soil Type',
+                'Infiltration Rate', 
+                'Water Table Depth',
+                'Roof Area',
+                'Annual Harvest Potential'
+            ],
+            'Value': [
+                st.session_state.address,
+                f"{st.session_state.rainfall_data['annual']:,} mm",
+                f"{st.session_state.rainfall_data['rainy_days']} days",
+                st.session_state.soil_data['type'],
+                f"{st.session_state.soil_data['infiltration_rate']} mm/hr",
+                f"{st.session_state.groundwater_data['depth']:.1f} m",
+                f"{st.session_state.roof_area} sq.m",
+                f"{annual_harvest:,.0f} liters"
+            ]
+        }
+        
+        tech_df = pd.DataFrame(technical_data)
+        st.dataframe(tech_df, use_container_width=True, hide_index=True)
+    
+    with col2:
+        st.subheader("💰 Financial Summary")
+        
+        # Calculate payback period string with proper formatting
+        payback_period_str = f"{payback_analysis['payback_period']:.1f} years" if payback_analysis['payback_period'] is not None else "N/A"
+        
+        financial_data = {
+            'Parameter': [
+                'Total Project Cost',
+                'Best Available Subsidy',
+                'Net Investment',
+                'Annual Water Savings',
+                'Annual Maintenance',
+                'Net Annual Benefit',
+                'Payback Period',
+                '20-Year NPV'
+            ],
+            'Value': [
+                f"₹{cost_breakdown['total_cost']:,}",
+                f"₹{best_subsidy:,}",
+                f"₹{cost_breakdown['total_cost'] - best_subsidy:,}",
+                f"₹{payback_analysis['annual_water_savings']:,}",
+                f"₹{payback_analysis['annual_maintenance']:,}",
+                f"₹{payback_analysis['net_annual_benefit']:,}",
+                payback_period_str,
+                f"₹{payback_analysis['npv']:,}"
+            ]
+        }
+        
+        fin_df = pd.DataFrame(financial_data)
+        st.dataframe(fin_df, use_container_width=True, hide_index=True)
+    
+    # Detailed recommendations
+    st.subheader("🎯 Implementation Recommendations")
+    
+    if feasibility_score >= 70:
+        st.success("✅ **PROCEED WITH IMPLEMENTATION**")
+        st.markdown(f"""
+        Your location shows excellent potential for rainwater harvesting:
+        
+        **Immediate Actions:**
+        1. Apply for **{best_scheme['name'] if best_scheme else 'available subsidies'}** - potential savings of ₹{best_subsidy:,}
+        2. Engage certified contractors from empaneled list
+        3. Obtain building permissions and technical clearances
+        
+        **Expected Benefits:**
+        - Annual water harvest: **{annual_harvest:,} liters**
+        - Annual cost savings: **₹{payback_analysis['annual_water_savings']:,}**
+        - Payback period: **{payback_period_str}**
+        - Water self-sufficiency: **{min(100, (annual_harvest/(150*365*4))*100):.0f}%** for family of 4
+        """)
+        
+    elif feasibility_score >= 50:
+        st.warning("⚡ **RECOMMENDED WITH MODIFICATIONS**")
+        st.markdown("""
+        Your location has good potential with some considerations:
+        
+        **Recommended Modifications:**
+        - Install larger storage capacity for seasonal variations
+        - Consider soil improvement measures for better infiltration
+        - Implement phased installation approach
+        
+        **Risk Mitigation:**
+        - Regular maintenance schedule
+        - Backup water source planning
+        - Quality monitoring system
+        """)
+        
+    else:
+        st.error("🔍 **DETAILED EVALUATION REQUIRED**")
+        st.markdown("""
+        Your location may face challenges requiring careful assessment:
+        
+        **Before Implementation:**
+        - Conduct detailed geological survey
+        - Consult with local water management experts
+        - Consider alternative water conservation methods
+        
+        **Potential Solutions:**
+        - Community-scale implementation
+        - Hybrid systems with groundwater recharge focus
+        - Advanced soil treatment techniques
+        """)
+    
+    # Implementation checklist
+    st.subheader("✅ Implementation Checklist")
+    
+    checklist = [
+        "Obtain building/construction permissions",
+        "Apply for government subsidies and approvals", 
+        "Select certified contractor from empaneled list",
+        "Finalize technical drawings and specifications",
+        "Conduct soil percolation test",
+        "Arrange financing and insurance",
+        "Schedule construction timeline",
+        "Install monitoring and control systems",
+        "Complete system testing and commissioning",
+        "Set up maintenance and monitoring schedule"
+    ]
+    
+    # Create interactive checklist
+    for i, item in enumerate(checklist):
+        st.checkbox(item, key=f"checklist_{i}")
+    
+    # Generate downloadable report
+    st.subheader("📄 Download Report")
+    
+    # Create comprehensive report data
+    report_summary = {
+        "Project Details": {
+            "Location": st.session_state.address,
+            "State": st.session_state.state_name,
+            "Analysis Date": pd.Timestamp.now().strftime('%Y-%m-%d'),
+            "Roof Area": f"{st.session_state.roof_area} sq.m",
+            "Roof Type": st.session_state.roof_type
+        },
+        "Technical Assessment": {
+            "Feasibility Score": f"{feasibility_score:.1f}/100",
+            "Recommendation": recommendation,
+            "Annual Rainfall": f"{st.session_state.rainfall_data['annual']} mm",
+            "Soil Type": st.session_state.soil_data['type'],
+            "Water Table Depth": f"{st.session_state.groundwater_data['depth']:.1f} m",
+            "Annual Harvest Potential": f"{annual_harvest:,} liters"
+        },
+        "Financial Analysis": {
+            "Total Project Cost": f"₹{cost_breakdown['total_cost']:,}",
+            "Available Subsidy": f"₹{best_subsidy:,}",
+            "Net Investment": f"₹{cost_breakdown['total_cost'] - best_subsidy:,}",
+            "Annual Savings": f"₹{payback_analysis['annual_water_savings']:,}",
+            "Payback Period": payback_period_str,
+            "20-Year NPV": f"₹{payback_analysis['npv']:,}"
+        }
+    }
+    
+    # Create downloadable CSV
+    all_data = {}
+    for category, data in report_summary.items():
+        for key, value in data.items():
+            all_data[f"{category} - {key}"] = value
+    
+    report_df = pd.DataFrame.from_dict(all_data, orient='index', columns=['Value'])
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.download_button(
+            label="📊 Download Summary (CSV)",
+            data=report_df.to_csv(),
+            file_name=f"rainwater_harvesting_report_{st.session_state.address.replace(' ', '_')}.csv",
+            mime="text/csv"
+        )
+    
+    with col2:
+        # Generate detailed text report
+        detailed_report = f"""
+RAINWATER HARVESTING FEASIBILITY ANALYSIS
+==========================================
 
-comparison_data = {
-    'Water Source': ['Rainwater Harvesting', 'Municipal Supply', 'Water Tanker', 'Borewell'],
-    'Initial Cost (₹)': [
-        results['cost_data']['total_initial'],
-        0,
-        0, 
-        150000  # Average borewell cost
-    ],
-    'Annual Cost (₹)': [
-        results['cost_data']['total_annual'],
-        results['total_demand'] * INDIAN_WATER_COSTS['municipal'],
-        results['total_demand'] * INDIAN_WATER_COSTS['tanker'],
-        results['total_demand'] * INDIAN_WATER_COSTS['borewell'] + 15000  # Electricity + maintenance
-    ],
-    'Reliability': ['High', 'Medium', 'Low', 'Medium'],
-    'Environmental Impact': ['Very Low', 'Medium', 'High', 'Medium']
-}
+EXECUTIVE SUMMARY
+Project Location: {st.session_state.address}
+Analysis Date: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}
+Feasibility Score: {feasibility_score:.1f}/100
+Recommendation: {recommendation}
 
-comparison_df = pd.DataFrame(comparison_data)
+TECHNICAL ASSESSMENT
+- Annual Rainfall: {st.session_state.rainfall_data['annual']:,} mm ({st.session_state.rainfall_data['rainy_days']} rainy days)
+- Soil Type: {st.session_state.soil_data['type']} (Infiltration: {st.session_state.soil_data['infiltration_rate']} mm/hr)
+- Water Table: {st.session_state.groundwater_data['depth']:.1f} meters ({st.session_state.groundwater_data['quality']} quality)
+- Roof Configuration: {st.session_state.roof_area} sq.m {st.session_state.roof_type} roof
+- System Efficiency: {st.session_state.system_efficiency*100:.0f}%
 
-st.subheader("💰 20-Year Total Cost Comparison")
+HARVEST POTENTIAL
+- Annual Water Harvest: {annual_harvest:,} liters
+- Daily Average: {annual_harvest/365:.0f} liters
+- Peak Month Harvest: {max(monthly_potential.values()):,.0f} liters
+- Water Self-Sufficiency: {min(100, (annual_harvest/(150*365*4))*100):.0f}% (family of 4)
 
-# Calculate 20-year costs
-twenty_year_costs = []
-for i in range(len(comparison_df)):
-    total_cost = comparison_df.iloc[i]['Initial Cost (₹)'] + (comparison_df.iloc[i]['Annual Cost (₹)'] * 20)
-    twenty_year_costs.append(total_cost)
+FINANCIAL ANALYSIS
+- Total Project Cost: ₹{cost_breakdown['total_cost']:,}
+- Government Subsidy: ₹{best_subsidy:,} ({(best_subsidy/cost_breakdown['total_cost']*100):.1f}%)
+- Net Investment: ₹{cost_breakdown['total_cost'] - best_subsidy:,}
+- Annual Water Savings: ₹{payback_analysis['annual_water_savings']:,}
+- Annual Maintenance: ₹{payback_analysis['annual_maintenance']:,}
+- Net Annual Benefit: ₹{payback_analysis['net_annual_benefit']:,}
+- Payback Period: {payback_period_str}
+- 20-Year NPV: ₹{payback_analysis['npv']:,}
+- Annual ROI: {(payback_analysis['net_annual_benefit']/cost_breakdown['total_cost']*100):.1f}%
 
-comparison_df['20-Year Total Cost (₹)'] = twenty_year_costs
+GOVERNMENT SCHEMES AVAILABLE
+- Best Option: {best_scheme['name'] if best_scheme else 'Not Available'}
+- Subsidy Rate: {best_scheme['subsidy_percentage'] if best_scheme else 0}%
+- Maximum Amount: ₹{best_scheme['max_amount'] if best_scheme else 0:,}
 
-# Display comparison
-st.dataframe(
-    comparison_df.style.format({
-        'Initial Cost (₹)': '₹{:,.0f}',
-        'Annual Cost (₹)': '₹{:,.0f}',
-        '20-Year Total Cost (₹)': '₹{:,.0f}'
-    }).background_gradient(subset=['20-Year Total Cost (₹)'], cmap='RdYlGn_r'),
-    use_container_width=True
-)
+ENVIRONMENTAL IMPACT
+- Annual Water Conservation: {annual_harvest:,} liters
+- Equivalent Population Served: {annual_harvest/365/100:.0f} people
+- Reduced Municipal Water Demand: {annual_harvest/1000:.1f} cubic meters
+- Groundwater Recharge Contribution: Significant
 
-# Find the most economical option
-min_cost_idx = comparison_df['20-Year Total Cost (₹)'].idxmin()
-most_economical = comparison_df.iloc[min_cost_idx]['Water Source']
+RECOMMENDATION SUMMARY
+{recommendation.upper()}: This analysis indicates {"excellent" if feasibility_score >= 70 else "good" if feasibility_score >= 50 else "challenging"} feasibility for rainwater harvesting at your location.
 
-if most_economical == 'Rainwater Harvesting':
-    st.success(f"✅ Rainwater harvesting is the most economical option over 20 years!")
-else:
-    savings_compared_to_rwh = comparison_df.iloc[0]['20-Year Total Cost (₹)'] - comparison_df.iloc[min_cost_idx]['20-Year Total Cost (₹)']
-    st.info(f"ℹ️ {most_economical} is more economical by ₹{savings_compared_to_rwh:,.0f} over 20 years")
+Generated using authentic Indian government data sources.
+For implementation, consult certified rainwater harvesting professionals.
 
-# --------------------------
-# Footer and Disclaimers  
-# --------------------------
-st.divider()
+Report End
+==========================================
+        """
+        
+        st.download_button(
+            label="📄 Download Detailed Report (TXT)",
+            data=detailed_report,
+            file_name=f"detailed_rainwater_report_{st.session_state.address.replace(' ', '_')}.txt",
+            mime="text/plain"
+        )
 
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    st.subheader("📊 Data Sources")
-    st.caption("• Rainfall: NASA POWER API")
-    st.caption("• Soil: SoilGrids Global Database")
-    st.caption("• Costs: Indian market averages")
-    st.caption("• Weather: Climate models & trends")
-
-with col2:
-    st.subheader("🧮 Methodology")
-    st.caption("• NPV with 7% discount rate")
-    st.caption("• 20-year lifecycle analysis")
-    st.caption("• 8% annual water cost increase")
-    st.caption("• 80% system efficiency factor")
-
-with col3:
-    st.subheader("⚠️ Limitations")
-    st.caption("• Based on historical patterns")
-    st.caption("• Generalized cost estimates")
-    st.caption("• Local regulations not included")
-    st.caption("• Site-specific factors may vary")
-
+# Footer
 st.markdown("---")
 st.markdown("""
-🔬 **Disclaimer**: This analysis provides estimates based on available meteorological and geographical data. 
-For implementation, consult with certified water management professionals and comply with local building codes 
-and regulations. Actual performance may vary based on site-specific conditions, maintenance practices, and 
-implementation quality.
-
-📧 **Feedback**: This tool is designed to promote sustainable water management in India. 
-For technical support or suggestions, please consult local water management experts.
-""")
-
-st.markdown("**🌧️ Enhanced Rainwater Harvesting Analysis System v2.0 - Indian Edition**")
-st.markdown("*Promoting water security and sustainability across India* 🇮🇳")
+<div style="text-align: center; color: #666; padding: 20px; background: #f8f9fa; border-radius: 10px; margin-top: 30px;">
+    <h4 style="color: #1E88E5; margin-bottom: 15px;">Smart Rainwater Harvesting Analyzer</h4>
+    <p><strong>Powered by Authentic Government Data Sources:</strong></p>
+    <p>Indian Meteorological Department (IMD) • Soil Health Card Database • Central Ground Water Board</p>
+    <p style="margin-top: 15px; font-style: italic;">This comprehensive analysis provides a scientific foundation for your rainwater harvesting project decision.</p>
+    <p><strong>Next Steps:</strong> Consult with certified professionals for detailed site assessment and implementation planning.</p>
+</div>
+""", unsafe_allow_html=True)
