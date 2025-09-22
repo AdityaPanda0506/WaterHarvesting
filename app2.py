@@ -18,6 +18,7 @@ if st.button("Run Recommendation"):
         )
 
     st.header("🌊 Rainwater Harvesting Feasibility Report 🌊")
+
     st.subheader("🏠 Input Details")
     st.markdown(f"- **Roof Area:** {final_report.input_data.roof_area} m²")
     st.markdown(f"- **Annual Rainfall:** {final_report.input_data.rainfall_mm} mm")
@@ -25,9 +26,9 @@ if st.button("Run Recommendation"):
     st.markdown(f"- **Budget:** {final_report.input_data.budget}")
 
     st.subheader("📊 Calculations")
-    st.markdown(f"- **Recommended Tank Volume:** {final_report.calculation_result.tank_volume} liters")
-    st.markdown(f"- **Estimated Cost:** {final_report.calculation_result.cost_estimate}")
-    st.markdown(f"- **Expected Overflow / Recharge:** {final_report.calculation_result.overflow} liters")
+    st.markdown(f"- **Recommended Tank Volume:** {final_report.calculation_result.tank_volume:.2f} liters")
+    st.markdown(f"- **Estimated Cost:** {final_report.calculation_result.cost_estimate:.2f}")
+    st.markdown(f"- **Expected Overflow / Recharge:** {final_report.calculation_result.overflow:.2f} liters")
 
     st.subheader("🛠️ Design Recommendations")
     st.markdown(f"- **Tank Type:** {final_report.design_recommendation.tank_type}")
@@ -45,4 +46,3 @@ if st.button("Run Recommendation"):
         file_name="rainwater_report.json",
         mime="application/json"
     )
-
